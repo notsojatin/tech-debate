@@ -1,0 +1,55 @@
+# Debate configuration. Service URLs come from the environment (see .env).
+
+models:
+  pro:
+    name: qwen3:4b
+    think_capable: true      # send think=false so reasoning never reaches the transcript or TTS
+    temperature: 0.7
+  con:
+    name: gemma3:4b
+    think_capable: false
+    temperature: 0.7
+  judge:
+    name: llama3.2:3b
+    think_capable: false
+    temperature: 0.0
+
+llm:
+  seed: 42
+  num_ctx: 8192
+  timeout_s: 600
+  keep_alive: 5m
+
+debate:
+  rebuttal_rounds: 2
+  turn_retries: 3
+  words:
+    opening: 120
+    rebuttal: 110
+    closing: 30
+  novelty_threshold: 0.6     # token-Jaccard; at or above this a new_point counts as a repeat
+  quote_match_ratio: 0.85
+  stance_check: true         # judge model checks each turn argues its assigned side; off-side turns retry
+
+research:
+  queries_per_side: 3
+  results_per_query: 4
+  fetch_per_query: 2
+  snippet_chars: 600
+  evidence_per_side_in_prompt: 6
+  fetch_timeout_s: 10
+  search_timeout_s: 15
+  max_page_bytes: 2000000
+
+voices:
+  pro: am_michael
+  con: bf_emma
+  narrator: bm_george
+  speed: 1.0
+
+render:
+  sentence_gap_ms: 150
+  speaker_gap_ms: 700
+  mp3_bitrate: 128k
+
+demo_topic: "Monorepos are better than polyrepos for most engineering teams"

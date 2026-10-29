@@ -1,0 +1,101 @@
+name: tech-debate
+
+# Profiles: cpu (default via .env), gpu (NVIDIA), host (use Ollama running on the host).
+x-ollama: &ollama
+  image: ollama/ollama:0.40.11
+  volumes:
+    - ollama:/root/.ollama
+  environment:
+    OLLAMA_KEEP_ALIVE: 5m
+    OLLAMA_MAX_LOADED_MODELS: "2"
+  restart: unless-stopped
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  ollama:
+    <<: *ollama
+    profiles: [cpu]
+
+  ollama-gpu:
+    <<: [*ollama, *gpu]
+    profiles: [gpu]
+    networks:
+      default:
+        aliases: [ollama]
+
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0
+    profiles: [cpu, host]
+    ports:
+      - "127.0.0.1:8880:8880"
+    restart: unless-stopped
+
+  kokoro-gpu:
+    <<: *gpu
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:v0.9.0
+    profiles: [gpu]
+    ports:
+      - "127.0.0.1:8880:8880"
+    networks:
+      default:
+        aliases: [kokoro]
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:2026.10.16-8252c0bf6
+    volumes:
+      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8888/
+    ports:
+      - "127.0.0.1:8888:8080"
+    restart: unless-stopped
+
+  # One-shot: pulls the pinned model tags into whichever Ollama OLLAMA_URL points at.
+  model-init:
+    build: .
+    image: tech-debate-app:local
+    entrypoint: ["python", "-m", "app.model_init"]
+    environment:
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      WRITE_MODEL_LOCK: ${WRITE_MODEL_LOCK:-0}
+      STRICT_MODELS: ${STRICT_MODELS:-0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config:/app/config:ro
+      - ./models.lock:/app/models.lock
+    restart: "no"
+
+  app:
+    build: .
+    image: tech-debate-app:local
+    command: ["demo"]
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+      searxng:
+        condition: service_started
+    environment:
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      SEARXNG_URL: http://searxng:8080
+      KOKORO_URL: http://kokoro:8880
+      OUT_DIR: /app/out
+      CACHE_DIR: /app/cache
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./out:/app/out
+      - ./cache:/app/cache
+      - ./config:/app/config:ro
+
+volumes:
+  ollama:

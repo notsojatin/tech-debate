@@ -1,0 +1,68 @@
+# Topics are refused if any deny term matches as a whole word/phrase (case-insensitive),
+# then a model must classify what is left as a technology topic.
+deny:
+  # politics & government
+  - election
+  - elections
+  - vote
+  - voting
+  - democrat
+  - democrats
+  - republican
+  - republicans
+  - liberal
+  - conservative
+  - left-wing
+  - right-wing
+  - president
+  - prime minister
+  - parliament
+  - congress
+  - senate
+  - immigration
+  - abortion
+  - gun control
+  - war
+  - israel
+  - palestine
+  - gaza
+  - ukraine
+  - russia
+  - trump
+  - biden
+  - harris
+  - putin
+  - modi
+  - xi jinping
+  - netanyahu
+  - zelensky
+  # religion
+  - religion
+  - islam
+  - muslim
+  - christian
+  - christianity
+  - jewish
+  - judaism
+  - hindu
+  - atheism
+  # violence, sex, hate
+  - kill
+  - murder
+  - terrorism
+  - terrorist
+  - genocide
+  - suicide
+  - rape
+  - porn
+  - sex
+  - nazi
+  - racism
+  - gender
+  - transgender
+
+classifier_prompt: >-
+  Decide whether this debate motion is about software, computing, engineering practice, developer
+  tooling, hardware, or the technology industry, and is not about politics, religion, identity,
+  violence, sexual content, or a real private individual. Answer is_tech=true only if it clearly is
+  a technology topic.

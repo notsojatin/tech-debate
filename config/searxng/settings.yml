@@ -1,0 +1,46 @@
+# Minimal SearXNG config for a private, internal instance used only by the debate app.
+use_default_settings:
+  engines:
+    keep_only:
+      - duckduckgo
+      - brave
+      - startpage
+      - mojeek
+      - wikipedia
+      - bing
+      - yahoo
+
+general:
+  instance_name: tech-debate
+  debug: false
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+server:
+  # Only reachable inside the compose network (and 127.0.0.1 on the host); not a real secret.
+  secret_key: "tech-debate-local-instance-not-a-secret"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
+  retries: 1
+
+# Several of these ship disabled upstream. Enabling many spreads load, so one engine rate-limiting
+# us (DuckDuckGo CAPTCHAs, Brave "too many requests") does not leave the debaters empty-handed.
+engines:
+  - name: bing
+    disabled: false
+  - name: startpage
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: yahoo
+    disabled: false

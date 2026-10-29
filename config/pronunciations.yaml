@@ -1,0 +1,68 @@
+# Replacements applied before text goes to Kokoro. Keys match whole words, case-sensitive.
+replace:
+  K8s: Kubernetes
+  k8s: Kubernetes
+  SQS: S-Q-S
+  SNS: S-N-S
+  AWS: A-W-S
+  GCP: G-C-P
+  CI/CD: C-I C-D
+  CI: C-I
+  CD: C-D
+  API: A-P-I
+  APIs: A-P-Is
+  SDK: S-D-K
+  CLI: C-L-I
+  UI: U-I
+  UX: U-X
+  LLM: L-L-M
+  LLMs: L-L-Ms
+  GPU: G-P-U
+  GPUs: G-P-Us
+  CPU: C-P-U
+  CPUs: C-P-Us
+  SQL: sequel
+  NoSQL: no-sequel
+  PostgreSQL: Postgres
+  MySQL: my sequel
+  GraphQL: graph Q-L
+  gRPC: G-R-P-C
+  OAuth: oh-auth
+  DevOps: dev-ops
+  SRE: S-R-E
+  SaaS: sass
+  PaaS: pass
+  IaaS: eye-ass
+  WASM: wasm
+  Wasm: wasm
+  npm: N-P-M
+  JSON: jason
+  YAML: yammel
+  macOS: mac O-S
+  iOS: eye-O-S
+  e.g.: for example
+  i.e.: that is
+  etc.: et cetera
+  vs.: versus
+  vs: versus
+  "&": and
+  "%": " percent"
+  ms: milliseconds
+  TypeScript: Type-Script
+  JavaScript: Java-Script
+# All-caps tokens (2-4 letters) are spelled out letter by letter unless listed here.
+say_as_word:
+  - NASA
+  - RAM
+  - ROM
+  - SaaS
+  - REST
+  - CRUD
+  - JIRA
+  - LAMP
+  - MEAN
+  - YAML
+  - JSON
+  - WASM
+  - OK
+  - AI
