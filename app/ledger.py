@@ -6,7 +6,7 @@ import re
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 Side = Literal["pro", "con"]
 
@@ -21,6 +21,7 @@ class Evidence(BaseModel):
     title: str
     snippet: str
 
+    @computed_field  # serialized, so the web UI and evidence.json get it too
     @property
     def domain(self) -> str:
         return domain_of(self.url)

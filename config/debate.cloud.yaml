@@ -1,0 +1,21 @@
+# Overlay for MODE=cloud (DEBATE_PROFILE=cloud): merged onto debate.yaml.
+# Each model is served by its own Cloud Run GPU service (see gcp/). Anything up to ~20B at 4-bit fits an L4.
+
+models:
+  pro:
+    name: gpt-oss:20b
+    think: low               # gpt-oss cannot disable reasoning; it goes to Ollama's `thinking` field, not `content`
+    temperature: 0.7
+  con:
+    name: qwen3:14b
+    think: false
+    temperature: 0.7
+  judge:
+    name: gemma3:12b
+    think: null
+    temperature: 0.0
+
+llm:
+  keep_alive: -1             # instances live at most ~10 min idle on Cloud Run; never unload inside one
+  warm_up: true              # load all three models in parallel before research, so cold starts overlap
+  timeout_s: 900

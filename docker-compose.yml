@@ -66,6 +66,11 @@ services:
     entrypoint: ["python", "-m", "app.model_init"]
     environment:
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_URL_PRO: ${OLLAMA_URL_PRO:-}
+      OLLAMA_URL_CON: ${OLLAMA_URL_CON:-}
+      OLLAMA_URL_JUDGE: ${OLLAMA_URL_JUDGE:-}
+      DEBATE_PROFILE: ${DEBATE_PROFILE:-}
+      MODEL_INIT_PULL: ${MODEL_INIT_PULL:-1}
       WRITE_MODEL_LOCK: ${WRITE_MODEL_LOCK:-0}
       STRICT_MODELS: ${STRICT_MODELS:-0}
     extra_hosts:
@@ -78,7 +83,10 @@ services:
   app:
     build: .
     image: tech-debate-app:local
-    command: ["demo"]
+    command: ["serve", "--host", "0.0.0.0"]  # published on 127.0.0.1 only, below
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
     depends_on:
       model-init:
         condition: service_completed_successfully
@@ -86,6 +94,10 @@ services:
         condition: service_started
     environment:
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_URL_PRO: ${OLLAMA_URL_PRO:-}
+      OLLAMA_URL_CON: ${OLLAMA_URL_CON:-}
+      OLLAMA_URL_JUDGE: ${OLLAMA_URL_JUDGE:-}
+      DEBATE_PROFILE: ${DEBATE_PROFILE:-}
       SEARXNG_URL: http://searxng:8080
       KOKORO_URL: http://kokoro:8880
       OUT_DIR: /app/out

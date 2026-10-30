@@ -44,6 +44,15 @@ def test_render_for_judge_anonymises_and_orders(tmp_path):
     assert "qwen" not in a and " p " not in a
 
 
+def test_stance_warnings_not_reported_as_facts(tmp_path):
+    from app.judge import side_facts
+    st = DebateState(topic="T", run_dir=tmp_path, models={})
+    st.turns = [Turn(phase=Phase.OPENINGS, side="pro", model="p", text="x",
+                     warnings=["accepted after 3 attempts with: stance check: seems off", "too long"])]
+    facts = side_facts(st, "pro")
+    assert facts["rule_warnings"] == 1 and "turns_flagged_off_side" not in facts
+
+
 @pytest.mark.parametrize("topic", ["Should we ban abortion", "Trump vs Biden on AI", "Islam vs Christianity"])
 def test_denylist_blocks(cfg, topic):
     with pytest.raises(TopicRejected):

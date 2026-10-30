@@ -57,14 +57,25 @@ def digests(http: httpx.Client) -> dict[str, str]:
 
 def main() -> None:
     cfg = load_config()
-    http = httpx.Client(base_url=cfg.services.ollama_url, timeout=60)
-    wait(http)
-    names = cfg.models.unique_names()
-    for name in names:
-        pull(http, name)
+    if os.environ.get("MODEL_INIT_PULL", "1") == "0":
+        # Cloud mode: each model is read from Cloud Storage by its own Cloud Run service and its digest is
+        # checked by gcp/sync-models.sh. Contacting the services here would wake three GPUs on every command.
+        print("MODEL_INIT_PULL=0: models are served remotely; skipping pull and digest check")
+        return
 
-    have = digests(http)
-    current = {n: have.get(n, "") for n in names}
+    by_url: dict[str, list[str]] = {}
+    for name, url in cfg.ollama_urls_by_model().items():
+        by_url.setdefault(url, []).append(name)
+
+    current: dict[str, str] = {}
+    for url, names in by_url.items():
+        http = httpx.Client(base_url=url, timeout=60)
+        wait(http)
+        for name in names:
+            pull(http, name)
+        have = digests(http)
+        current.update({n: have.get(n, "") for n in names})
+
     locked = json.loads(LOCK.read_text()) if LOCK.exists() and LOCK.read_text().strip() else {}
     drift = {n: (locked[n], d) for n, d in current.items() if n in locked and locked[n] != d}
     for n, (old, new) in drift.items():

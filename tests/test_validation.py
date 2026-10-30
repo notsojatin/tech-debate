@@ -55,6 +55,54 @@ def test_inline_cites_repaired_without_retry(cfg):
                          opponent_text=None).errors == []
 
 
+def test_bare_and_dashed_ids_leave_no_gaps():
+    from app.agents import repair_inline_cites
+    cases = {
+        "Analyses like E5 reveal it is cheap.": "Analyses like one source reveal it is cheap.",
+        "As detailed in E14 and E15, fees are small.": "As detailed in these sources, fees are small.",
+        "Numerous case studies – E12, E13 – show wide adoption.": "Numerous case studies show wide adoption.",
+        "Fees are small (E2, E3).": "Fees are small.",
+    }
+    for raw, want in cases.items():
+        out = OpeningOut(text=raw, cites=[], new_point="x")
+        repair_inline_cites(out)
+        assert out.text == want, raw
+        assert out.cites  # IDs were moved into cites
+
+
+def test_counter_claim():
+    from app.agents import counter_claim
+    assert counter_claim("Kubernetes is overkill for most startups") == "Kubernetes is not overkill for most startups"
+    assert counter_claim("Rust is better than Go for CLIs.") == "Rust is not better than Go for CLIs"
+    assert counter_claim("Microservices should be avoided by small teams") == \
+        "Microservices should not be avoided by small teams"
+    assert counter_claim("ORMs are not worth it") == "ORMs are worth it"
+    assert counter_claim("Startups need Kubernetes") == "It is not true that Startups need Kubernetes"
+
+
+def test_stance_check_uses_explicit_claims(cfg, tmp_path):
+    from app.agents import StanceOut, stance_check
+    from app.state import DebateState
+
+    class Classifier:
+        def __init__(self, answer):
+            self.answer, self.prompt = answer, ""
+
+        def structured(self, model, system, user, schema):
+            self.prompt = user
+            return StanceOut(reason="r", supports=self.answer)
+
+    st = DebateState(topic="Kubernetes is overkill for most startups", run_dir=tmp_path,
+                     models={}, counter_claim="Kubernetes is not overkill for most startups")
+    clf = Classifier("claim_2")
+    err = stance_check(clf, cfg, st, "pro", "Startups do not need Kubernetes.")
+    assert 'Claim 2: "Kubernetes is not overkill for most startups"' in clf.prompt
+    assert err and "stance check:" in err
+    assert stance_check(Classifier("claim_1"), cfg, st, "pro", "t") is None
+    assert stance_check(Classifier("both"), cfg, st, "pro", "t") is None
+    assert stance_check(Classifier("claim_1"), cfg, st, "con", "t") is not None
+
+
 def test_quote_matching():
     src = "Polyrepos let teams ship independently. They also isolate failures."
     assert quote_matches("Polyrepos let teams ship independently", src, 0.85)

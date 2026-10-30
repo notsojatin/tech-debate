@@ -3,23 +3,18 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Callable, Literal
 
 from pydantic import BaseModel
 
+from app.agents import STANCE_MARK
 from app.config import Config
 from app.llm import ChatClient
-from app.state import DebateState, Phase
+from app.state import DebateState, is_rebuttal, phase_title
 
 CRITERIA = ("evidence_use", "rebuttal_responsiveness", "argument_quality", "stayed_on_side")
 TIE_MARGIN = 1.0
 SIDE_NAMES = {"pro": "Pro", "con": "Con"}
-PHASE_TITLES = {
-    Phase.OPENINGS: "Openings",
-    Phase.REBUTTAL_1: "Rebuttal round 1",
-    Phase.REBUTTAL_2: "Rebuttal round 2",
-    Phase.CLOSINGS: "Closings",
-}
 
 
 class SideScores(BaseModel):
@@ -54,14 +49,14 @@ SYSTEM = (
 
 def side_facts(state: DebateState, side: str) -> dict:
     turns = [t for t in state.turns if t.side == side]
-    rebuttals = [t for t in turns if t.phase in (Phase.REBUTTAL_1, Phase.REBUTTAL_2)]
+    rebuttals = [t for t in turns if is_rebuttal(t.phase)]
     cites = [c for t in turns for c in t.cites]
     return {
         "valid_citations": len(cites),
         "distinct_evidence": len(set(cites)),
         "rebuttals_quoting_opponent": f"{sum(bool(t.quote_matched) for t in rebuttals)}/{len(rebuttals)}",
-        "rule_warnings": sum(len(t.warnings) for t in turns),
-        "turns_flagged_off_side": sum(any("judged to argue" in w for w in t.warnings) for t in turns),
+        # Stance-check flags come from a small classifier, so they are left out: the judge decides that itself.
+        "rule_warnings": sum(1 for t in turns for w in t.warnings if STANCE_MARK not in w),
     }
 
 
@@ -73,11 +68,9 @@ def render_for_judge(state: DebateState, first: str) -> str:
     for side in sorted(label, key=lambda s: label[s]):
         lines.append(f"Side {label[side]} argues {stance[side]} the motion.")
     lines.append("")
-    for phase, title in PHASE_TITLES.items():
+    for phase in state.spoken_phases():
         turns = sorted(state.turns_in(phase), key=lambda t: label[t.side])
-        if not turns:
-            continue
-        lines.append(f"## {title}")
+        lines.append(f"## {phase_title(phase)}")
         for t in turns:
             lines.append(f"Side {label[t.side]}:")
             if t.quote:
@@ -145,12 +138,14 @@ def combine(run_pro_first: JudgeOut, run_con_first: JudgeOut) -> dict:
     }
 
 
-def judge(llm: ChatClient, cfg: Config, state: DebateState) -> dict:
+def judge(llm: ChatClient, cfg: Config, state: DebateState, check: Callable[[], None] | None = None) -> dict:
+    """`check` is called before each pass and may raise to stop judging (e.g. on cancel)."""
     model = cfg.models.judge
-    outs = [
-        llm.structured(model, SYSTEM, render_for_judge(state, first), JudgeOut)
-        for first in ("pro", "con")
-    ]
+    outs = []
+    for first in ("pro", "con"):
+        if check:
+            check()
+        outs.append(llm.structured(model, SYSTEM, render_for_judge(state, first), JudgeOut))
     result = combine(*outs)
     result["model"] = model.name
     result["facts"] = {side: side_facts(state, side) for side in ("pro", "con")}
