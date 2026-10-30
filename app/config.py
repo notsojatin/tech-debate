@@ -96,6 +96,7 @@ class RenderCfg(BaseModel):
 class Services(BaseModel):
     ollama_url: str
     ollama_urls: dict[str, str] = {}  # per-role overrides (OLLAMA_URL_PRO, ...)
+    model_urls: dict[str, str] = {}   # model-name -> URL bound before role overrides
     searxng_url: str
     kokoro_url: str
     out_dir: Path
@@ -104,16 +105,54 @@ class Services(BaseModel):
 
 class Config(BaseModel):
     models: Models
+    catalog: list[ModelCfg] = []
     llm: LLMCfg = LLMCfg()
     debate: DebateCfg = DebateCfg()
     research: ResearchCfg = ResearchCfg()
     voices: Voices = Voices()
     render: RenderCfg = RenderCfg()
     demo_topic: str
+    preset_topics: list[str] = []
     services: Services
 
+    def curated_models(self) -> list[ModelCfg]:
+        """Ordered list of allowed models from `models` (pro, con, judge) plus any extra `catalog` entries."""
+        seen: dict[str, ModelCfg] = {}
+        for role in ROLES:
+            m = self.models.for_role(role)
+            seen.setdefault(m.name, m)
+        for m in self.catalog:
+            seen.setdefault(m.name, m)
+        return list(seen.values())
+
+    def with_role_models(self, role_names: dict[str, str]) -> "Config":
+        """Return a copy of Config with updated role models chosen from the curated catalog."""
+        by_name = {m.name: m for m in self.curated_models()}
+        new_models: dict[str, ModelCfg] = {}
+        for role in ROLES:
+            default_cfg = self.models.for_role(role)
+            chosen_name = role_names.get(role, default_cfg.name)
+            if chosen_name not in by_name:
+                raise ValueError(f"Unknown model {chosen_name!r}; allowed: {list(by_name)}")
+            base_model = by_name[chosen_name]
+            new_models[role] = ModelCfg(
+                name=base_model.name,
+                think=base_model.think,
+                temperature=default_cfg.temperature,
+            )
+        # Preserve original model->URL bindings so swapping roles in cloud mode still hits the right service.
+        bound_urls = dict(self.services.model_urls)
+        for role in ROLES:
+            orig_name = self.models.for_role(role).name
+            if role in self.services.ollama_urls and orig_name not in bound_urls:
+                bound_urls[orig_name] = self.services.ollama_urls[role]
+        new_services = self.services.model_copy(update={"model_urls": bound_urls})
+        return self.model_copy(update={"models": Models(**new_models), "services": new_services})
+
     def ollama_url_for(self, model_name: str) -> str:
-        """Base URL of the Ollama serving `model_name`: its role's override, else OLLAMA_URL."""
+        """Base URL of the Ollama serving `model_name`: bound model URL, role override, else OLLAMA_URL."""
+        if model_name in self.services.model_urls:
+            return self.services.model_urls[model_name]
         for role in ROLES:
             if self.models.for_role(role).name == model_name and role in self.services.ollama_urls:
                 return self.services.ollama_urls[role]

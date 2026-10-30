@@ -9,7 +9,7 @@ Everything runs locally with one command. No API keys and no accounts are needed
 | **Ollama** | runs the models, with JSON-schema structured output |
 | **SearXNG** | self-hosted meta-search (JSON API) |
 | **Kokoro** (via Kokoro-FastAPI) | text-to-speech on CPU or GPU |
-| **app** | Python orchestrator: debate state machine, evidence ledger, judge, audio stitching |
+| **app** | Python orchestrator (debate state machine, evidence ledger, judge, audio stitching) plus the web UI on port 8000 |
 | **model-init** | one-shot container that pulls the pinned models on first start |
 
 Default lineup (edit `config/debate.yaml`):
@@ -24,16 +24,16 @@ Default lineup (edit `config/debate.yaml`):
 
 ```bash
 git clone <this repo> && cd tech-debate
-docker compose up          # cpu profile: pulls models, then runs the demo debate
+docker compose up          # cpu profile: pulls models, then serves the web UI
 ```
 
-The finished run lands in `out/<timestamp>-<slug>/`. Stop the stack with Ctrl-C once the app prints `done:`.
+Open http://localhost:8000, pick a motion and the models, and press **Start Debate** (see [Web UI](#web-ui)). Runs land in `out/<timestamp>-<slug>/`.
 
 For repeated use, the Makefile is nicer:
 
 ```bash
-make up                                   # start services + pull models (MODE auto-detected)
-make demo                                 # canned topic
+make up                                   # start services + pull models + web UI (MODE auto-detected)
+make demo                                 # canned topic, from the command line
 make debate TOPIC="Rust is better than Go for command-line tools"
 make replay RUN=out/<run-dir>             # same topic + queries, search served from cache only
 make render RUN=out/<run-dir>             # rebuild transcript/SRT/MP3, no LLM calls
@@ -52,6 +52,25 @@ make down
 With `make`, set the mode with `make up MODE=gpu` and so on. With plain compose, set it with `COMPOSE_PROFILES=gpu docker compose up`.
 
 In host mode, model-init pulls the models into your local Ollama. On Linux, host mode needs Ollama listening on the Docker bridge: `OLLAMA_HOST=0.0.0.0 ollama serve`.
+
+## Web UI
+
+`make up` (or `docker compose up`) serves it at **http://localhost:8000**:
+- **Choose:** a preset or custom motion, and which model plays Pro, Con and Judge.
+- **Watch it live:** a phase stepper, the research queries and evidence ledger, turn cards with quoted rebuttal targets and retry badges, then the two-pass verdict.
+- **Live audio:** each turn is voiced as soon as it's accepted and plays while the next turn is being written. When the debate ends, the player switches to the stitched MP3, with a transcript you can click to jump to any sentence.
+- **History:** every run in `out/` is listed, with cancel and resume.
+
+The server only listens on `127.0.0.1`. It refuses state-changing requests from other websites, because debates in cloud mode cost GPU time.
+
+**Running it on the host instead of in Docker:**
+
+```bash
+make serve                       # API + built UI on 127.0.0.1:8000 (needs `npm run build` in web/ first)
+cd web && npm ci && npm run dev  # UI dev server on :5173, proxying /api to :8000
+```
+
+The command-line tools (`make debate`, `make demo`, `make replay`, `make render`) work as before and share the same `out/` folder.
 
 ## What you get
 

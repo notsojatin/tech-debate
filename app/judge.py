@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Callable, Literal
 
 from pydantic import BaseModel
 
@@ -146,12 +146,14 @@ def combine(run_pro_first: JudgeOut, run_con_first: JudgeOut) -> dict:
     }
 
 
-def judge(llm: ChatClient, cfg: Config, state: DebateState) -> dict:
+def judge(llm: ChatClient, cfg: Config, state: DebateState, check: Callable[[], None] | None = None) -> dict:
+    """`check` is called before each pass and may raise to stop judging (e.g. on cancel)."""
     model = cfg.models.judge
-    outs = [
-        llm.structured(model, SYSTEM, render_for_judge(state, first), JudgeOut)
-        for first in ("pro", "con")
-    ]
+    outs = []
+    for first in ("pro", "con"):
+        if check:
+            check()
+        outs.append(llm.structured(model, SYSTEM, render_for_judge(state, first), JudgeOut))
     result = combine(*outs)
     result["model"] = model.name
     result["facts"] = {side: side_facts(state, side) for side in ("pro", "con")}

@@ -1,3 +1,10 @@
+FROM node:22.23.3-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
 FROM python:3.12.15-slim-trixie
 
 RUN apt-get update \
@@ -17,6 +24,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY app ./app
 COPY config ./config
 COPY models.lock ./
+COPY --from=web /web/dist ./web/dist
 
+EXPOSE 8000
 ENTRYPOINT ["python", "-m", "app"]
-CMD ["demo"]
+# Inside the container the server must listen on all interfaces; Compose publishes it on 127.0.0.1 only.
+CMD ["serve", "--host", "0.0.0.0"]

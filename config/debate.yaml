@@ -51,3 +51,13 @@ render:
   mp3_bitrate: 128k
 
 demo_topic: "Monorepos are better than polyrepos for most engineering teams"
+
+preset_topics:
+  - "Monorepos are better than polyrepos for most engineering teams"
+  - "Rust is better than Go for command-line tools"
+  - "Kubernetes is overkill for most startups"
+  - "Microservices do more harm than good for mid-sized engineering teams"
+  - "SQLite on a single node is enough for most production web apps"
+  - "Open-weight local LLMs are better than proprietary APIs for enterprise teams"
+  - "Server-side rendering is better than single-page applications for modern web apps"
+  - "ORMs do more harm than good in production backend systems"

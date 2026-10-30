@@ -102,11 +102,19 @@ def main(argv: list[str] | None = None) -> None:
     ren.add_argument("--no-audio", action="store_true")
     ct = sub.add_parser("check-topic", help="run only the topic filter")
     ct.add_argument("topic")
+    srv = sub.add_parser("serve", help="start the FastAPI + Web UI server")
+    srv.add_argument("--host", default="127.0.0.1", help="0.0.0.0 only inside a container")
+    srv.add_argument("--port", type=int, default=8000)
 
     args = p.parse_args(argv)
     cfg = load_config()
 
-    if args.cmd == "debate":
+    if args.cmd == "serve":
+        import uvicorn
+        from app.server import create_app, DebateManager
+
+        uvicorn.run(create_app(DebateManager(cfg)), host=args.host, port=args.port)
+    elif args.cmd == "debate":
         run_new(cfg, args.topic, args)
     elif args.cmd == "demo":
         run_new(cfg, cfg.demo_topic, args)

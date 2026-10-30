@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import wave
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.config import Config
 from app.state import DebateState, Phase
@@ -36,11 +37,16 @@ class Segment:
     text: str
 
 
-def build_script(state: DebateState) -> list[Segment]:
+def intro_line(state: DebateState) -> str:
     m = state.models
-    segs = [Segment("narrator",
-                    f"Tonight's motion: {state.topic.rstrip('.')}. Arguing for, {spoken_model(m['pro'])}. "
-                    f"Arguing against, {spoken_model(m['con'])}. Judging, {spoken_model(m['judge'])}.")]
+    return (
+        f"Tonight's motion: {state.topic.rstrip('.')}. Arguing for, {spoken_model(m['pro'])}. "
+        f"Arguing against, {spoken_model(m['con'])}. Judging, {spoken_model(m['judge'])}."
+    )
+
+
+def build_script(state: DebateState) -> list[Segment]:
+    segs = [Segment("narrator", intro_line(state))]
     for phase, heading in PHASE_HEADINGS.items():
         turns = state.turns_in(phase)
         if not turns:
@@ -77,6 +83,113 @@ def _ts(ms: int) -> str:
 
 def caption_text(text: str) -> str:
     return clean_for_speech(text, Pronunciation({}))
+
+
+def _parse_ts(ts: str) -> int:
+    h, m, rest = ts.strip().split(":")
+    s, ms = rest.split(",")
+    return int(h) * 3_600_000 + int(m) * 60_000 + int(s) * 1000 + int(ms)
+
+
+def parse_srt(srt_text: str) -> list[dict]:
+    """Parse an SRT file into structured cues with start_ms, end_ms, speaker, and text."""
+    cues: list[dict] = []
+    for block in re.split(r"\n\s*\n", srt_text.strip()):
+        lines = [ln.strip() for ln in block.strip().splitlines() if ln.strip()]
+        if len(lines) < 3 or "-->" not in lines[1]:
+            continue
+        start_str, end_str = lines[1].split("-->")
+        raw_text = " ".join(lines[2:])
+        speaker = "Narrator"
+        text = raw_text
+        m = re.match(r"^\[(Pro|Con|Narrator)\]\s*(.*)$", raw_text)
+        if m:
+            speaker, text = m.group(1), m.group(2)
+        cues.append({
+            "index": len(cues) + 1,
+            "start_ms": _parse_ts(start_str),
+            "end_ms": _parse_ts(end_str),
+            "speaker": speaker.lower(),
+            "text": text,
+        })
+    return cues
+
+
+@dataclass
+class LiveSegment:
+    """One clip the web UI plays live: narrator intro, one per turn, narrator verdict."""
+    segment_id: str
+    speaker: str
+    text: str
+    phase: str
+    turn_index: int | None = None
+
+
+def turn_segment_id(index: int, phase: str, side: str) -> str:
+    return f"turn_{index:02d}_{phase}_{side}"
+
+
+def live_segments(state: DebateState) -> list[LiveSegment]:
+    """Every live clip the run's saved progress implies, in playback order."""
+    segs: list[LiveSegment] = []
+    if Phase.RESEARCH in state.phases_done:
+        segs.append(LiveSegment("00_intro", "narrator", intro_line(state), Phase.RESEARCH.value))
+    for i, t in enumerate(state.turns):
+        segs.append(LiveSegment(turn_segment_id(i, t.phase.value, t.side), t.side, t.text, t.phase.value, i))
+    if state.judge:
+        segs.append(LiveSegment("99_verdict", "narrator", verdict_line(state.judge), Phase.JUDGE.value))
+    return segs
+
+
+def prune_live_segments(state: DebateState) -> list[str]:
+    """Delete clips that no longer match the saved state (turns dropped by a cancel). Returns names removed."""
+    seg_dir = state.run_dir / "segments"
+    if not seg_dir.is_dir():
+        return []
+    keep = {f"{s.segment_id}.wav" for s in live_segments(state)}
+    removed = []
+    for wav in seg_dir.glob("*.wav"):
+        if wav.name not in keep:
+            wav.unlink(missing_ok=True)
+            removed.append(wav.name)
+    return removed
+
+
+def render_segment_wav(
+    cfg: Config,
+    tts: KokoroClient,
+    speaker: str,
+    text: str,
+    out_path: Path,
+) -> dict:
+    """Synthesize a single segment to `out_path` WAV (populating the sentence TTS cache) and return metadata."""
+    pron = Pronunciation()
+    silence = lambda ms: b"\x00\x00" * int(SAMPLE_RATE * ms / 1000)  # noqa: E731
+    voices = {"pro": cfg.voices.pro, "con": cfg.voices.con, "narrator": cfg.voices.narrator}
+    pcm = bytearray()
+    cues: list[dict] = []
+    sentences = split_sentences(caption_text(text))
+    for j, sentence in enumerate(sentences):
+        if j:
+            pcm += silence(cfg.render.sentence_gap_ms)
+        spoken = clean_for_speech(sentence, pron)
+        if not re.search(r"\w", spoken):
+            continue
+        start = len(pcm) // 2 * 1000 // SAMPLE_RATE
+        pcm += tts.synth(spoken, voices[speaker])
+        end = len(pcm) // 2 * 1000 // SAMPLE_RATE
+        cues.append({"start_ms": start, "end_ms": end, "speaker": speaker, "text": sentence})
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_suffix(".wav.tmp")
+    with wave.open(str(tmp_path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SAMPLE_RATE)
+        w.writeframes(bytes(pcm))
+    tmp_path.replace(out_path)
+    duration_s = round(len(pcm) / 2 / SAMPLE_RATE, 2)
+    return {"filename": out_path.name, "speaker": speaker, "duration_s": duration_s, "cues": cues}
 
 
 def render_audio(state: DebateState, cfg: Config, tts: KokoroClient, log=print) -> float:

@@ -86,6 +86,8 @@ def test_prepare_models_warms_every_url(monkeypatch):
     gens = {(port, body["model"]) for _, port, path, body in calls if path == "/api/generate"}
     assert gens == {(11441, "gpt-oss:20b"), (11442, "qwen3:14b"), (11443, "gemma3:12b")}
     assert all(body["keep_alive"] == -1 for *_, path, body in calls if path == "/api/generate")
+    # Loaded at the debate's context size, so the first real request doesn't reload the model.
+    assert all(body["options"]["num_ctx"] == 8192 for *_, path, body in calls if path == "/api/generate")
 
 
 def test_prepare_models_fails_fast_on_auth_errors(monkeypatch):
@@ -126,3 +128,29 @@ def test_gcp_naming_and_sizing(model, service, tier):
     out = subprocess.run(["bash", "-c", f'source gcp/lib.sh && service_name "{model}" && size_tier "{model}"'],
                          capture_output=True, text=True, check=True).stdout.split("\n")
     assert out[0] == service and out[1] == tier
+
+
+def test_prepare_models_stops_waiting_on_cancel(monkeypatch):
+    import time as _time
+    real = httpx.Client
+
+    def slow(req):
+        _time.sleep(0.5)
+        return httpx.Response(503)  # never ready
+
+    monkeypatch.setattr(llm.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(slow), **kw))
+
+    class Stop(Exception):
+        pass
+
+    t0 = _time.monotonic()
+    calls = {"n": 0}
+
+    def check():
+        calls["n"] += 1
+        if calls["n"] > 2:
+            raise Stop()
+
+    with pytest.raises(Stop):
+        llm.prepare_models(load_config(), log=lambda *_: None, timeout_s=60, check=check)
+    assert _time.monotonic() - t0 < 5

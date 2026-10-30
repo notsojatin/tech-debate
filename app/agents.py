@@ -5,7 +5,7 @@ from __future__ import annotations
 import difflib
 import re
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel
 
@@ -374,7 +374,10 @@ def run_turn(
     side: Side,
     phase: Phase,
     user_prompt: str,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+    cancel_point: Callable[[], None] | None = None,
 ) -> Turn:
+    """`cancel_point` is called before every model call and may raise to stop the turn (e.g. on cancel)."""
     schema = {Phase.OPENINGS: OpeningOut, Phase.CLOSINGS: ClosingOut}.get(phase, RebuttalOut)
     opp = state.last_turn("con" if side == "pro" else "pro")
     opponent_text = opp.text if (opp and schema is RebuttalOut) else None
@@ -385,16 +388,51 @@ def run_turn(
     check = Check()
     attempts = 0
     for attempts in range(1, cfg.debate.turn_retries + 1):
+        if cancel_point:
+            cancel_point()
+        if on_event:
+            on_event({
+                "type": "turn_attempt",
+                "phase": phase.value,
+                "side": side,
+                "model": model.name,
+                "attempt": attempts,
+                "max_attempts": cfg.debate.turn_retries,
+                "status": "generating",
+            })
         out = llm.structured(model, system, user_prompt + feedback, schema)
         repair_inline_cites(out)
         check = validate_turn(out, phase=phase, cfg=cfg, ledger=state.ledger,
                               own_points=state.points_made[side], opponent_text=opponent_text)
         if not check.errors and cfg.debate.stance_check:
+            if on_event:
+                on_event({
+                    "type": "turn_attempt",
+                    "phase": phase.value,
+                    "side": side,
+                    "model": model.name,
+                    "attempt": attempts,
+                    "max_attempts": cfg.debate.turn_retries,
+                    "status": "stance_check",
+                })
+            if cancel_point:
+                cancel_point()
             off_side = stance_check(llm, cfg, state, side, out.text)
             if off_side:
                 check.errors.append(off_side)
         if not check.errors:
             break
+        if on_event:
+            on_event({
+                "type": "turn_attempt",
+                "phase": phase.value,
+                "side": side,
+                "model": model.name,
+                "attempt": attempts,
+                "max_attempts": cfg.debate.turn_retries,
+                "status": "rejected",
+                "errors": list(check.errors),
+            })
         feedback = (
             "\n\nYour previous answer was rejected for these reasons:\n"
             + "\n".join(f"- {e}" for e in check.errors)

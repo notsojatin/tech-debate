@@ -4,3 +4,5 @@ out
 cache
 tests
 **/__pycache__
+web/node_modules
+web/dist

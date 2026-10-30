@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from typing import Callable, Protocol, TypeVar
 
 import httpx
@@ -105,10 +105,11 @@ class OllamaClient:
 
 
 def prepare_models(cfg: Config, names: list[str] | None = None, log: Callable[[str], None] = print,
-                   timeout_s: float = 900) -> dict[str, float]:
+                   timeout_s: float = 900, check: Callable[[], None] | None = None) -> dict[str, float]:
     """Wait until the Ollama serving each model answers, all in parallel. With `llm.warm_up` also load
     each model (an empty generate), so on Cloud Run the cold starts and weight loads overlap instead of
-    landing on the first debate turn. Returns seconds until each model was ready."""
+    landing on the first debate turn. Logs each model as it becomes ready; `check` is called while
+    waiting and may raise to abandon the wait (e.g. on cancel). Returns seconds until each was ready."""
     names = names or cfg.models.unique_names()
     urls = cfg.ollama_urls_by_model(names)
     log(f"waiting for {len(names)} model server(s): {', '.join(sorted(set(urls.values())))}")
@@ -117,6 +118,8 @@ def prepare_models(cfg: Config, names: list[str] | None = None, log: Callable[[s
         t0 = time.monotonic()
         with httpx.Client(base_url=urls[name], timeout=timeout_s) as c:
             while True:
+                if check:
+                    check()
                 try:
                     code = c.get("/api/version", timeout=60).status_code
                     if code in (401, 403):
@@ -132,13 +135,27 @@ def prepare_models(cfg: Config, names: list[str] | None = None, log: Callable[[s
                     raise LLMError(f"ollama for {name} is not reachable at {urls[name]}")
                 time.sleep(3)
             if cfg.llm.warm_up:
-                r = c.post("/api/generate", json={"model": name, "prompt": "", "keep_alive": cfg.llm.keep_alive})
+                # Load with the context size the debate uses: a different num_ctx makes Ollama reload the
+                # model on the first real request (measured: +45-60 s per model on Cloud Run).
+                r = c.post("/api/generate", json={"model": name, "prompt": "", "keep_alive": cfg.llm.keep_alive,
+                                                  "options": {"num_ctx": cfg.llm.num_ctx}})
                 if r.status_code != 200:
                     raise LLMError(f"warm-up of {name} failed: {r.status_code} {r.text[:200]}")
-        return time.monotonic() - t0
-
-    with ThreadPoolExecutor(max_workers=len(names)) as pool:
-        took = dict(zip(names, pool.map(ready, names)))
-    for name, secs in took.items():
+        secs = time.monotonic() - t0
         log(f"  {name}: ready in {secs:.0f}s")
-    return took
+        return secs
+
+    pool = ThreadPoolExecutor(max_workers=len(names))
+    futures = {pool.submit(ready, n): n for n in names}
+    try:
+        pending = set(futures)
+        while pending:
+            done, pending = wait(pending, timeout=1, return_when=FIRST_EXCEPTION)
+            for f in done:
+                f.result()  # re-raise the first failure
+            if check:
+                check()
+        return {futures[f]: f.result() for f in futures}
+    finally:
+        # Don't block on a warm-up still in flight after a cancel or failure; it finishes on its own.
+        pool.shutdown(wait=False, cancel_futures=True)

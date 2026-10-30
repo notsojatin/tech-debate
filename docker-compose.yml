@@ -83,7 +83,10 @@ services:
   app:
     build: .
     image: tech-debate-app:local
-    command: ["demo"]
+    command: ["serve", "--host", "0.0.0.0"]  # published on 127.0.0.1 only, below
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
     depends_on:
       model-init:
         condition: service_completed_successfully

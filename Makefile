@@ -41,10 +41,10 @@ RUN_APP := docker compose run --rm app
 TOPIC ?=
 RUN ?=
 
-.PHONY: up down logs demo debate replay resume render check-topic lock-models test build ps \
+.PHONY: up down logs demo debate replay resume render check-topic serve lock-models test build ps \
 	cloud-setup cloud-sync-models cloud-deploy cloud-proxy cloud-status cloud-down
 
-up: ## start services and pull models
+up: ## start services, pull models, and launch the Web UI on http://localhost:8000
 	@echo "mode: $(MODE)"
 	@if [ "$(MODE)" = "host" ] && ! curl -sf http://localhost:11434/api/version >/dev/null; then \
 	  echo "Host Ollama is not running. Start the Ollama app or run 'ollama serve', or use MODE=cpu."; exit 1; fi
@@ -52,6 +52,12 @@ up: ## start services and pull models
 	  echo "Cloud proxy on :$$p is not running. Run 'make cloud-proxy' in another terminal first."; exit 1; }; done; fi
 	docker compose up -d --build $(SERVICES)
 	docker compose run --rm model-init
+	docker compose up -d --build --no-deps app
+	@echo "Web UI running at http://localhost:8000"
+
+serve: ## run FastAPI + Web UI server directly on the host
+	OLLAMA_URL=$${OLLAMA_URL:-http://localhost:11434} SEARXNG_URL=$${SEARXNG_URL:-http://localhost:8888} KOKORO_URL=$${KOKORO_URL:-http://localhost:8880} \
+	  uv run python -m app serve
 
 down:
 	docker compose down
