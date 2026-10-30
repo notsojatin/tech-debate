@@ -3,8 +3,31 @@ set -euo pipefail
 
 GCP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$GCP_DIR/.." && pwd)"
+
+# Load .env.local / .env without overriding variables already set in the caller's environment.
+for _env_file in "$ROOT/.env.local" "$ROOT/.env"; do
+  if [[ -f "$_env_file" ]]; then
+    while IFS= read -r _line || [[ -n "$_line" ]]; do
+      [[ "$_line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+      _k="${BASH_REMATCH[1]}"
+      _v="${BASH_REMATCH[2]}"
+      _v="${_v#"${_v%%[![:space:]]*}"}"
+      _v="${_v%"${_v##*[![:space:]]}"}"
+      if [[ -z "${!_k+x}" ]]; then
+        export "$_k=$_v"
+      fi
+    done < "$_env_file"
+  fi
+done
+unset _env_file _line _k _v
+
 # shellcheck source=config.env
 source "$GCP_DIR/config.env"
+
+if [[ -n "${BASH_SOURCE[1]:-}" && -z "$PROJECT_ID" ]]; then
+  echo "error: PROJECT_ID is not set. Set it in .env.local, the environment, or via 'gcloud config set project <id>'." >&2
+  exit 1
+fi
 
 RUNTIME_SA="tech-debate-ollama@${PROJECT_ID}.iam.gserviceaccount.com"
 BUILD_SA="tech-debate-build@${PROJECT_ID}.iam.gserviceaccount.com"

@@ -55,7 +55,10 @@ Each service is set to `--min-instances 0 --max-instances 1`. When there are no 
 
 ## Steps
 
+Set your GCP project in `.env.local` (gitignored), in `PROJECT_ID`, or via `gcloud config set project <id>`:
+
 ```bash
+echo "PROJECT_ID=your-gcp-project-id" >> .env.local
 make cloud-setup          # once: APIs, bucket, service accounts, Private Google Access
 make cloud-sync-models    # pull the models into the bucket (Cloud Build, ~10–20 min the first time)
 make cloud-deploy         # create/update the three services
