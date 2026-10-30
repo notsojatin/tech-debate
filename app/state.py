@@ -48,6 +48,7 @@ class DebateState(BaseModel):
     phases_done: list[Phase] = []
     ledger: Ledger = Ledger()
     queries: dict[str, list[str]] = {}
+    counter_claim: str | None = None
     turns: list[Turn] = []
     points_made: dict[str, list[str]] = {"pro": [], "con": []}
     judge: dict[str, Any] | None = None

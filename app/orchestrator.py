@@ -90,6 +90,9 @@ class Orchestrator:
             self.render(state)
 
     def research(self, state: DebateState) -> None:
+        if self.cfg.debate.stance_check and not state.counter_claim:
+            state.counter_claim = agents.counter_claim(state.topic)
+            self.log(f"  counter-claim: {state.counter_claim}")
         if self.researcher is None:
             state.warnings.append("search disabled; debaters argued without evidence")
             return

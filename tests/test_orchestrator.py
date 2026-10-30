@@ -36,7 +36,8 @@ class FakeLLM:
             return schema(quote=first, attacks="It is wrong.", text=f"That is false. New point number {self.n}.",
                           cites=ids[:1], new_point=f"{side} unique argument {self.n} zebra{self.n}")
         if schema is agents.StanceOut:
-            return schema(argues="for" if "FOR" in user.split("Statement:")[1][:60] else "against", reason="x")
+            statement = user.split("Statement:")[1]
+            return schema(reason="x", supports="claim_1" if "FOR" in statement[:80] else "claim_2")
         if schema is agents.ClosingOut:
             return schema(text=f"Vote {side.lower()}.")
         if schema is JudgeOut:
@@ -67,6 +68,7 @@ def test_full_run(cfg, tmp_path):
 
     assert [p.value for p in state.phases_done][-1] == "done"
     assert len(state.ledger.items) == 4
+    assert state.counter_claim == "It is not true that Monorepos beat polyrepos"
     assert len(state.turns) == 2 + 2 * cfg.debate.rebuttal_rounds + 2
     # First opening was retried after a bogus cite and ended up valid.
     pro_open = state.turns[0]

@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.agents import STANCE_MARK
 from app.config import Config
 from app.llm import ChatClient
 from app.state import DebateState, Phase
@@ -60,8 +61,8 @@ def side_facts(state: DebateState, side: str) -> dict:
         "valid_citations": len(cites),
         "distinct_evidence": len(set(cites)),
         "rebuttals_quoting_opponent": f"{sum(bool(t.quote_matched) for t in rebuttals)}/{len(rebuttals)}",
-        "rule_warnings": sum(len(t.warnings) for t in turns),
-        "turns_flagged_off_side": sum(any("judged to argue" in w for w in t.warnings) for t in turns),
+        # Stance-check flags come from a small classifier, so they are left out: the judge decides that itself.
+        "rule_warnings": sum(1 for t in turns for w in t.warnings if STANCE_MARK not in w),
     }
 
 

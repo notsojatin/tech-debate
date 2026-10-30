@@ -56,6 +56,7 @@ def run_new(cfg: Config, topic: str, args, seed_state: DebateState | None = None
     state = new_state(cfg, topic)
     if seed_state is not None:
         state.queries = dict(seed_state.queries)
+        state.counter_claim = seed_state.counter_claim
     print(f"run dir: {state.run_dir}")
     state.save()
     try:
