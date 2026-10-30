@@ -3,15 +3,13 @@
 models:
   pro:
     name: qwen3:4b
-    think_capable: true      # send think=false so reasoning never reaches the transcript or TTS
+    think: false             # sent as Ollama's `think`; false keeps reasoning out of the transcript and TTS
     temperature: 0.7
   con:
     name: gemma3:4b
-    think_capable: false
     temperature: 0.7
   judge:
     name: llama3.2:3b
-    think_capable: false
     temperature: 0.0
 
 llm:

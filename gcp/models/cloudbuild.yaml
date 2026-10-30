@@ -1,0 +1,47 @@
+# Pulls the cloud models with Ollama inside Cloud Build (in GCP, not over your uplink) and syncs the
+# Ollama model store to gs://$_BUCKET/ollama, complete enough to be mounted read-only.
+# `$$` is a literal `$` for the shell.
+steps:
+  - id: pull
+    name: ${_OLLAMA_IMAGE}
+    entrypoint: bash
+    env: ["OLLAMA_MODELS=/workspace/ollama"]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        ollama serve >/workspace/serve.log 2>&1 &
+        for i in $$(seq 1 60); do ollama list >/dev/null 2>&1 && break; sleep 1; done
+        : > /workspace/digests.txt
+        for m in ${_MODELS}; do
+          echo "pulling $$m"
+          ollama pull "$$m"
+          name="$${m%%:*}"; tag="$${m#*:}"
+          case "$$name" in */*) path="$$name" ;; *) path="library/$$name" ;; esac
+          digest=$$(sha256sum "/workspace/ollama/manifests/registry.ollama.ai/$$path/$$tag" | cut -d' ' -f1)
+          echo "$$m $$digest" >> /workspace/digests.txt
+        done
+        # The services mount the store read-only, so write everything Ollama would create lazily now:
+        # `show` writes metadata/, and manifests-v2/ entries are symlinks into blobs/, which
+        # `gcloud storage rsync` skips; replace them with copies of the (small) manifest files.
+        for m in ${_MODELS}; do ollama show "$$m" >/dev/null; done
+        find /workspace/ollama -type l | while read -r link; do
+          target=$$(readlink -f "$$link"); rm "$$link"; cp "$$target" "$$link"
+        done
+        echo "symlinks left: $$(find /workspace/ollama -type l | wc -l)"
+        ollama list
+        cat /workspace/digests.txt
+  - id: upload
+    name: ${_CLOUD_SDK_IMAGE}
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud storage rsync --recursive /workspace/ollama gs://${_BUCKET}/ollama
+        gcloud storage cp /workspace/digests.txt gs://${_BUCKET}/digests.txt
+options:
+  machineType: E2_HIGHCPU_8
+  diskSizeGb: 200
+  logging: CLOUD_LOGGING_ONLY
+timeout: 3600s

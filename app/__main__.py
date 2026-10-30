@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 
 from app.config import Config, load_config
-from app.llm import OllamaClient
+from app.llm import LLMError, OllamaClient, prepare_models
 from app.orchestrator import Orchestrator, new_state
 from app.safety import TopicRejected, check_topic
 from app.state import DebateState, Phase
@@ -32,9 +32,16 @@ def wait_for(name: str, url: str, timeout_s: float = 300) -> None:
         time.sleep(3)
 
 
+def ready_models(cfg: Config, names: list[str] | None = None) -> None:
+    try:
+        prepare_models(cfg, names)
+    except LLMError as e:
+        sys.exit(str(e))
+
+
 def build(cfg: Config, *, search: bool, audio: bool, replay: bool) -> Orchestrator:
     s = cfg.services
-    wait_for("ollama", f"{s.ollama_url}/api/version")
+    ready_models(cfg)
     researcher = None
     if search:
         if not replay:
@@ -48,6 +55,10 @@ def build(cfg: Config, *, search: bool, audio: bool, replay: bool) -> Orchestrat
 
 
 def run_new(cfg: Config, topic: str, args, seed_state: DebateState | None = None) -> DebateState:
+    try:
+        check_topic(topic, cfg, None)  # denylist first: a refused topic never wakes the model servers
+    except TopicRejected as e:
+        sys.exit(f"Refused: {e}")
     orch = build(cfg, search=not args.no_search, audio=not args.no_audio, replay=args.replay)
     try:
         check_topic(topic, cfg, orch.llm)
@@ -118,8 +129,9 @@ def main(argv: list[str] | None = None) -> None:
             state.phases_done.append(Phase.RENDER)
         state.save()
     elif args.cmd == "check-topic":
-        wait_for("ollama", f"{cfg.services.ollama_url}/api/version")
         try:
+            check_topic(args.topic, cfg, None)
+            ready_models(cfg, [cfg.models.judge.name])  # only the judge classifies topics
             check_topic(args.topic, cfg, OllamaClient(cfg))
             print("OK: allowed")
         except TopicRejected as e:

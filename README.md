@@ -47,6 +47,7 @@ make down
 | `cpu` (default for bare `docker compose up`) | container | CPU container | Works anywhere with Docker |
 | `gpu` | container with NVIDIA GPU | GPU container | Linux/WSL with an NVIDIA card and the NVIDIA Container Toolkit |
 | `host` (auto-picked on macOS when `ollama` is installed) | **your own Ollama** | CPU container | Apple Silicon. Docker on macOS can't use Metal, so native Ollama is several times faster |
+| `cloud` | **Cloud Run GPUs**, one private service per model, scale-to-zero | CPU container | Bigger models (up to ~20B) without local hardware. See [gcp/README.md](gcp/README.md) |
 
 With `make`, set the mode with `make up MODE=gpu` and so on. With plain compose, set it with `COMPOSE_PROFILES=gpu docker compose up`.
 
@@ -112,6 +113,7 @@ Measured on an Apple M-series laptop (8 cores, 16 GB) with the demo topic:
 |---|---|---|---|
 | `host` mode (native Ollama, Metal) | ≈ 6–10 min | ≈ 3 min | ≈ 9–13 min |
 | `cpu` mode (all in Docker, 5 vCPU / 12.5 GB) | ≈ 16 min | ≈ 2.5 min | ≈ 19.5 min |
+| `cloud` mode (20B/14B/12B on 3× L4, from cold) | ≈ 3 min warm-up + ≈ 3.7 min | ≈ 1.6 min | ≈ 9 min |
 
 - **First-time setup:** the first `make up` in `cpu` mode took about 14 minutes, almost all of it model downloads. That depends on your connection.
 - **Output:** a debate produces about 5–6 minutes of audio.
@@ -161,6 +163,7 @@ This repository is MIT-licensed (see `LICENSE`). The components it pulls in have
 |---|---|---|
 | Ollama | MIT | |
 | Qwen3 | Apache-2.0 | |
+| gpt-oss (cloud lineup) | Apache-2.0 | |
 | Gemma 3 | Gemma Terms of Use | Use restrictions apply; read them before publishing output commercially |
 | Llama 3.2 | Llama 3.2 Community License + Acceptable Use Policy | Includes attribution requirements ("Built with Llama") |
 | Kokoro-82M weights | Apache-2.0 | |
