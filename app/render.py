@@ -11,16 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import Config
-from app.state import DebateState, Phase
+from app.state import DebateState, Phase, phase_heading
 from app.tools.tts import SAMPLE_RATE, KokoroClient, Pronunciation, clean_for_speech, split_sentences
 
 SIDE_LABEL = {"pro": "Pro", "con": "Con", "narrator": "Narrator"}
-PHASE_HEADINGS = {
-    Phase.OPENINGS: "Opening statements",
-    Phase.REBUTTAL_1: "Rebuttals, round one",
-    Phase.REBUTTAL_2: "Rebuttals, round two",
-    Phase.CLOSINGS: "Closing lines",
-}
 
 
 def spoken_model(name: str) -> str:
@@ -47,12 +41,9 @@ def intro_line(state: DebateState) -> str:
 
 def build_script(state: DebateState) -> list[Segment]:
     segs = [Segment("narrator", intro_line(state))]
-    for phase, heading in PHASE_HEADINGS.items():
-        turns = state.turns_in(phase)
-        if not turns:
-            continue
-        segs.append(Segment("narrator", heading + "."))
-        segs.extend(Segment(t.side, t.text) for t in turns)
+    for phase in state.spoken_phases():
+        segs.append(Segment("narrator", phase_heading(phase) + "."))
+        segs.extend(Segment(t.side, t.text) for t in state.turns_in(phase))
     if state.judge:
         segs.append(Segment("narrator", verdict_line(state.judge)))
     return segs
@@ -262,12 +253,9 @@ def transcript_markdown(state: DebateState) -> str:
         f"- **Judge:** `{m['judge']}`",
         "",
     ]
-    for phase, heading in PHASE_HEADINGS.items():
-        turns = state.turns_in(phase)
-        if not turns:
-            continue
-        out += [f"## {heading.replace(', round', ' — round')}", ""]
-        for t in turns:
+    for phase in state.spoken_phases():
+        out += [f"## {phase_heading(phase).replace(', round', ' — round')}", ""]
+        for t in state.turns_in(phase):
             out.append(f"**{SIDE_LABEL[t.side]}** (`{t.model}`)")
             out.append("")
             if t.quote:

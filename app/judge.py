@@ -10,17 +10,11 @@ from pydantic import BaseModel
 from app.agents import STANCE_MARK
 from app.config import Config
 from app.llm import ChatClient
-from app.state import DebateState, Phase
+from app.state import DebateState, is_rebuttal, phase_title
 
 CRITERIA = ("evidence_use", "rebuttal_responsiveness", "argument_quality", "stayed_on_side")
 TIE_MARGIN = 1.0
 SIDE_NAMES = {"pro": "Pro", "con": "Con"}
-PHASE_TITLES = {
-    Phase.OPENINGS: "Openings",
-    Phase.REBUTTAL_1: "Rebuttal round 1",
-    Phase.REBUTTAL_2: "Rebuttal round 2",
-    Phase.CLOSINGS: "Closings",
-}
 
 
 class SideScores(BaseModel):
@@ -55,7 +49,7 @@ SYSTEM = (
 
 def side_facts(state: DebateState, side: str) -> dict:
     turns = [t for t in state.turns if t.side == side]
-    rebuttals = [t for t in turns if t.phase in (Phase.REBUTTAL_1, Phase.REBUTTAL_2)]
+    rebuttals = [t for t in turns if is_rebuttal(t.phase)]
     cites = [c for t in turns for c in t.cites]
     return {
         "valid_citations": len(cites),
@@ -74,11 +68,9 @@ def render_for_judge(state: DebateState, first: str) -> str:
     for side in sorted(label, key=lambda s: label[s]):
         lines.append(f"Side {label[side]} argues {stance[side]} the motion.")
     lines.append("")
-    for phase, title in PHASE_TITLES.items():
+    for phase in state.spoken_phases():
         turns = sorted(state.turns_in(phase), key=lambda t: label[t.side])
-        if not turns:
-            continue
-        lines.append(f"## {title}")
+        lines.append(f"## {phase_title(phase)}")
         for t in turns:
             lines.append(f"Side {label[t.side]}:")
             if t.quote:

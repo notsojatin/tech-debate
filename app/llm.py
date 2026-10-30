@@ -22,6 +22,15 @@ class LLMError(RuntimeError):
     pass
 
 
+class OutputTruncated(LLMError):
+    """The model stopped at `num_predict` before finishing, so its JSON is incomplete."""
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough upper estimate: English prose averages ~4 characters per token; 3 leaves margin for markup and IDs."""
+    return len(text) // 3 + 1
+
+
 def strip_thinking(text: str) -> str:
     """Remove reasoning blocks, including an unterminated leading one."""
     text = _THINK_RE.sub("", text)
@@ -72,7 +81,10 @@ class OllamaClient:
                 continue
             if r.status_code != 200:
                 raise LLMError(f"ollama {r.status_code}: {r.text[:300]}")
-            return r.json()["message"]["content"]
+            data = r.json()
+            if data.get("done_reason") == "length":
+                raise OutputTruncated(f"output hit num_predict ({self.cfg.llm.num_predict} tokens)")
+            return data["message"]["content"]
         raise LLMError(f"ollama request failed: {last_exc}")
 
     def structured(self, model: ModelCfg, system: str, user: str, schema: type[T]) -> T:
@@ -89,16 +101,28 @@ class OllamaClient:
                 "temperature": model.temperature,
                 "seed": self.cfg.llm.seed,
                 "num_ctx": self.cfg.llm.num_ctx,
+                "num_predict": self.cfg.llm.num_predict,
             },
         }
         if model.think is not None and model.name not in self._no_think_param:
             payload["think"] = model.think
 
+        # Ollama silently drops the start of a prompt that does not fit, so refuse instead of judging half a debate.
+        budget = self.cfg.llm.num_ctx - self.cfg.llm.num_predict
+        est = estimate_tokens(system + user + json.dumps(payload["format"]))
+        if est > budget:
+            raise LLMError(f"prompt for {model.name} is ~{est} tokens, over the {budget} that num_ctx "
+                           f"({self.cfg.llm.num_ctx}) leaves after num_predict ({self.cfg.llm.num_predict})")
+
         errors: list[str] = []
-        for _ in range(2):
-            raw = strip_thinking(self._post_chat(payload))
+        for attempt in range(2):
+            # A fixed seed would make the retry repeat the same output; step it for the second attempt.
+            payload["options"]["seed"] = self.cfg.llm.seed + attempt
             try:
+                raw = strip_thinking(self._post_chat(payload))
                 return schema.model_validate(json.loads(raw))
+            except OutputTruncated as e:
+                errors.append(str(e))
             except (json.JSONDecodeError, ValidationError) as e:
                 errors.append(str(e)[:200])
         raise LLMError(f"{model.name} returned invalid JSON for {schema.__name__}: {errors}")

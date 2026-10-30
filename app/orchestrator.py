@@ -13,7 +13,7 @@ from app import agents, judge, render
 from app.config import Config
 from app.ledger import Side
 from app.llm import ChatClient
-from app.state import DebateState, Phase, rebuttal_phase
+from app.state import DebateState, Phase, is_rebuttal, rebuttal_no, rebuttal_phase
 from app.tools.search import Researcher
 from app.tools.tts import KokoroClient
 
@@ -32,7 +32,8 @@ def new_state(cfg: Config, topic: str, out_dir: Path | None = None) -> DebateSta
     out_dir = out_dir or cfg.services.out_dir
     run_dir = out_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{slugify(topic)}"
     models = {role: cfg.models.for_role(role).name for role in ("pro", "con", "judge")}
-    return DebateState(topic=topic, run_dir=run_dir, models=models)
+    return DebateState(topic=topic, run_dir=run_dir, models=models,
+                       rebuttal_rounds=cfg.debate.rebuttal_rounds, speech_length=cfg.debate.speech_length)
 
 
 def phase_plan(cfg: Config) -> list[Phase]:
@@ -135,7 +136,7 @@ class Orchestrator:
                 state.timings_s[phase.value] = round(time.monotonic() - t0, 1)
                 state.phases_done.append(phase)
                 state.save()
-                if phase in (Phase.OPENINGS, Phase.CLOSINGS) or phase.value.startswith("rebuttal"):
+                if phase in (Phase.OPENINGS, Phase.CLOSINGS) or is_rebuttal(phase):
                     for t in state.turns_in(phase):
                         self.log(f"  [{t.side}] {t.text}")
                 self._emit({
@@ -159,8 +160,8 @@ class Orchestrator:
         elif phase is Phase.OPENINGS:
             for side in SIDES:
                 self._turn(state, side, phase, agents.opening_prompt(state, self.cfg, side))
-        elif phase.value.startswith("rebuttal_"):
-            n = int(phase.value.rsplit("_", 1)[1])
+        elif is_rebuttal(phase):
+            n = rebuttal_no(phase)
             for side in SIDES:
                 self._turn(state, side, phase, agents.rebuttal_prompt(state, self.cfg, side, n))
         elif phase is Phase.CLOSINGS:

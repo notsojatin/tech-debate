@@ -40,6 +40,9 @@ endif
 RUN_APP := docker compose run --rm app
 TOPIC ?=
 RUN ?=
+ROUNDS ?=   # rebuttal rounds, 1-10 (default from config)
+LENGTH ?=   # speech length: short | standard | long (default from config)
+DEBATE_FLAGS := $(if $(strip $(ROUNDS)),--rounds $(strip $(ROUNDS))) $(if $(strip $(LENGTH)),--length $(strip $(LENGTH)))
 
 .PHONY: up down logs demo debate replay resume render check-topic serve lock-models test build ps \
 	cloud-setup cloud-sync-models cloud-deploy cloud-proxy cloud-status cloud-down
@@ -72,15 +75,15 @@ build:
 	docker compose build
 
 demo: ## one canned topic, end to end
-	$(RUN_APP) demo
+	$(RUN_APP) demo $(DEBATE_FLAGS)
 
 debate: ## make debate TOPIC="Rust is better than Go for CLIs"
 	@test -n "$(TOPIC)" || (echo 'usage: make debate TOPIC="..."' && exit 1)
-	$(RUN_APP) debate "$(TOPIC)"
+	$(RUN_APP) debate "$(TOPIC)" $(DEBATE_FLAGS)
 
 replay: ## same topic and queries, search served from cache only: make replay RUN=out/<run>
 	@test -n "$(RUN)" || (echo 'usage: make replay RUN=out/<run-dir>' && exit 1)
-	$(RUN_APP) replay "/app/$(RUN)"
+	$(RUN_APP) replay "/app/$(RUN)" $(DEBATE_FLAGS)
 
 resume:
 	@test -n "$(RUN)" || (echo 'usage: make resume RUN=out/<run-dir>' && exit 1)

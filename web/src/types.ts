@@ -7,6 +7,20 @@ export interface ModelOption {
   temperature: number;
 }
 
+export type SpeechLength = 'short' | 'standard' | 'long';
+
+export interface WordLimits {
+  opening: number;
+  rebuttal: number;
+  closing: number;
+}
+
+export interface DebateOptions {
+  rebuttal_rounds: { min: number; max: number; default: number };
+  speech_lengths: Record<SpeechLength, WordLimits>;
+  default_speech_length: SpeechLength;
+}
+
 export interface ModelsResponse {
   profile: string;
   models: ModelOption[];
@@ -17,6 +31,7 @@ export interface ModelsResponse {
   };
   demo_topic: string;
   preset_topics: string[];
+  debate_options: DebateOptions;
   active_run_id: string | null;
 }
 
@@ -29,6 +44,7 @@ export interface DebateSummary {
   status: 'done' | 'running' | 'cancelling' | 'cancelled' | 'interrupted' | 'error';
   winner: 'pro' | 'con' | 'tie' | null;
   totals: { pro: number; con: number } | null;
+  rebuttal_rounds: number;
   turn_count: number;
   evidence_count: number;
   has_audio: boolean;
@@ -89,6 +105,8 @@ export interface DebateState {
     con: string;
     judge: string;
   };
+  rebuttal_rounds: number | null;
+  speech_length: SpeechLength | null;
   phases_done: string[];
   ledger: {
     items: EvidenceItem[];
@@ -152,6 +170,8 @@ export interface DebateDetail {
   current_step: CurrentStep | null;
   state: DebateState;
   phases_plan: string[];
+  rebuttal_rounds: number;
+  speech_length: SpeechLength;
   has_mp3: boolean;
   has_wav: boolean;
   audio_url: string | null;

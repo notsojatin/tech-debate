@@ -5,10 +5,15 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
+
+from app.state import MAX_REBUTTAL_ROUNDS
+
+if TYPE_CHECKING:
+    from app.state import DebateState
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = Path(os.environ.get("DEBATE_CONFIG_DIR", ROOT / "config"))
@@ -48,7 +53,8 @@ class Models(BaseModel):
 
 class LLMCfg(BaseModel):
     seed: int = 42
-    num_ctx: int = 8192
+    num_ctx: int = 16384
+    num_predict: int = 2048  # output cap per call; includes reasoning tokens for models that think
     timeout_s: float = 600
     keep_alive: str | int = "5m"
     warm_up: bool = False  # load every model up front, in parallel (cloud: overlaps the cold starts)
@@ -60,13 +66,35 @@ class Words(BaseModel):
     closing: int = 30
 
 
+SPEECH_LENGTHS = {
+    "short": Words(opening=80, rebuttal=70, closing=25),
+    "standard": Words(opening=120, rebuttal=110, closing=30),
+    "long": Words(opening=200, rebuttal=180, closing=40),
+}
+
+
 class DebateCfg(BaseModel):
     rebuttal_rounds: int = 2
     turn_retries: int = 3
-    words: Words = Words()
+    words: Words = Words()  # the active limits; `with_debate_settings` sets them from `speech_lengths`
+    speech_lengths: dict[str, Words] = SPEECH_LENGTHS
+    speech_length: str = "standard"  # name of the active preset, recorded on each new debate
     novelty_threshold: float = 0.6
     quote_match_ratio: float = 0.85
     stance_check: bool = True
+
+    @field_validator("rebuttal_rounds")
+    @classmethod
+    def _rounds_in_range(cls, v: int) -> int:
+        if not 1 <= v <= MAX_REBUTTAL_ROUNDS:
+            raise ValueError(f"rebuttal_rounds must be between 1 and {MAX_REBUTTAL_ROUNDS}, got {v}")
+        return v
+
+    @model_validator(mode="after")
+    def _known_length(self) -> "DebateCfg":
+        if self.speech_length not in self.speech_lengths:
+            raise ValueError(f"speech_length {self.speech_length!r} is not one of {list(self.speech_lengths)}")
+        return self
 
 
 class ResearchCfg(BaseModel):
@@ -149,6 +177,21 @@ class Config(BaseModel):
         new_services = self.services.model_copy(update={"model_urls": bound_urls})
         return self.model_copy(update={"models": Models(**new_models), "services": new_services})
 
+    def with_debate_settings(self, rounds: int | None = None, length: str | None = None) -> "Config":
+        """Return a copy with this debate's rebuttal rounds and speech length; None keeps the configured value."""
+        rounds = self.debate.rebuttal_rounds if rounds is None else rounds
+        length = self.debate.speech_length if length is None else length
+        if not 1 <= rounds <= MAX_REBUTTAL_ROUNDS:
+            raise ValueError(f"Rebuttal rounds must be between 1 and {MAX_REBUTTAL_ROUNDS}, got {rounds}")
+        if length not in self.debate.speech_lengths:
+            raise ValueError(f"Unknown speech length {length!r}; allowed: {list(self.debate.speech_lengths)}")
+        debate = self.debate.model_copy(update={
+            "rebuttal_rounds": rounds,
+            "speech_length": length,
+            "words": self.debate.speech_lengths[length],
+        })
+        return self.model_copy(update={"debate": debate})
+
     def ollama_url_for(self, model_name: str) -> str:
         """Base URL of the Ollama serving `model_name`: bound model URL, role override, else OLLAMA_URL."""
         if model_name in self.services.model_urls:
@@ -160,6 +203,19 @@ class Config(BaseModel):
 
     def ollama_urls_by_model(self, names: list[str] | None = None) -> dict[str, str]:
         return {n: self.ollama_url_for(n) for n in (names or self.models.unique_names())}
+
+
+def cfg_for_state(cfg: Config, state: "DebateState") -> Config:
+    """The config a saved debate runs with: its models, rounds and speech length. Runs saved before a setting
+    existed (or whose model is no longer in the catalog) fall back to the configured value."""
+    try:
+        cfg = cfg.with_role_models(state.models)
+    except ValueError:
+        pass
+    try:
+        return cfg.with_debate_settings(state.rebuttal_rounds, state.speech_length)
+    except ValueError:
+        return cfg
 
 
 def load_yaml(name: str) -> dict:
@@ -189,7 +245,9 @@ def load_config(profile: str | None = None) -> Config:
         out_dir=Path(os.environ.get("OUT_DIR", ROOT / "out")),
         cache_dir=Path(os.environ.get("CACHE_DIR", ROOT / "cache")),
     )
-    return Config.model_validate(data)
+    cfg = Config.model_validate(data)
+    # Apply the configured preset so `debate.words` always matches `debate.speech_length`.
+    return cfg.with_debate_settings()
 
 
 if __name__ == "__main__":

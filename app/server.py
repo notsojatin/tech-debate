@@ -12,20 +12,20 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import render
-from app.config import ROLES, Config, ROOT, load_config
+from app.config import ROLES, Config, ROOT, cfg_for_state, load_config
 from app.llm import ChatClient, LLMError, OllamaClient, prepare_models
 from app.orchestrator import DebateCancelled, Orchestrator, new_state, phase_plan
 from app.safety import TopicRejected, check_topic
-from app.state import DebateState, Phase
+from app.state import MAX_REBUTTAL_ROUNDS, DebateState, Phase
 from app.tools.search import DiskCache, Researcher, SearxResearcher
 from app.tools.tts import KokoroClient
 
@@ -39,6 +39,8 @@ DEV_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173"}
 class CreateDebateReq(BaseModel):
     topic: str
     models: dict[str, str] | None = None
+    rebuttal_rounds: int | None = Field(None, ge=1, le=MAX_REBUTTAL_ROUNDS)  # None: the configured default
+    speech_length: Literal["short", "standard", "long"] | None = None
     no_search: bool = False
     no_audio: bool = False
     replay: bool = False
@@ -166,6 +168,7 @@ class DebateManager:
                 "status": status,
                 "winner": st.judge.get("winner") if st.judge else None,
                 "totals": st.judge.get("totals") if st.judge else None,
+                "rebuttal_rounds": st.rebuttal_rounds or self.cfg.debate.rebuttal_rounds,
                 "turn_count": len(st.turns),
                 "evidence_count": len(st.ledger.items),
                 "has_audio": has_audio,
@@ -184,6 +187,7 @@ class DebateManager:
         run_dir = self.run_dir(run_id)
         active = self.active if (self.active and self.active.run_id == run_id) else None
         state = active.state if active else DebateState.load(run_dir)
+        run_cfg = active.cfg if active else cfg_for_state(self.cfg, state)
         status = self._status_for(run_id, state)
 
         has_mp3 = (run_dir / "debate.mp3").exists()
@@ -204,7 +208,9 @@ class DebateManager:
             "error": active.error if active else None,
             "current_step": active.current_step if active else None,
             "state": json.loads(state.model_dump_json()),
-            "phases_plan": [p.value for p in phase_plan(self.cfg)],
+            "phases_plan": [p.value for p in phase_plan(run_cfg)],
+            "rebuttal_rounds": run_cfg.debate.rebuttal_rounds,
+            "speech_length": run_cfg.debate.speech_length,
             "has_mp3": has_mp3,
             "has_wav": has_wav,
             "audio_url": f"/api/debates/{run_id}/audio/master" if (has_mp3 or has_wav) else None,
@@ -240,6 +246,7 @@ class DebateManager:
         topic = req.topic.strip()
         try:
             run_cfg = self.cfg.with_role_models(req.models) if req.models else self.cfg
+            run_cfg = run_cfg.with_debate_settings(req.rebuttal_rounds, req.speech_length)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
@@ -275,10 +282,7 @@ class DebateManager:
         if Phase.DONE in state.phases_done:
             return self.get_debate_detail(run_id)
 
-        try:
-            run_cfg = self.cfg.with_role_models(state.models)
-        except ValueError:
-            run_cfg = self.cfg
+        run_cfg = cfg_for_state(self.cfg, state)
 
         with self._lock:
             if self.active is not None and self.active.status in ("running", "cancelling"):
@@ -430,12 +434,18 @@ def create_app(manager: DebateManager | None = None) -> FastAPI:
         ]
         defaults = {r: cfg.models.for_role(r).name for r in ROLES}
         presets = list(cfg.preset_topics) if cfg.preset_topics else [cfg.demo_topic]
+        debate_options = {
+            "rebuttal_rounds": {"min": 1, "max": MAX_REBUTTAL_ROUNDS, "default": cfg.debate.rebuttal_rounds},
+            "speech_lengths": {name: w.model_dump() for name, w in cfg.debate.speech_lengths.items()},
+            "default_speech_length": cfg.debate.speech_length,
+        }
         return {
             "profile": profile,
             "models": curated,
             "defaults": defaults,
             "demo_topic": cfg.demo_topic,
             "preset_topics": presets,
+            "debate_options": debate_options,
             "active_run_id": mgr.active.run_id if mgr.is_busy() and mgr.active else None,
         }
 

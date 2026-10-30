@@ -81,13 +81,15 @@ def test_prepare_models_warms_every_url(monkeypatch):
         monkeypatch.setenv(f"OLLAMA_URL_{role}", f"http://h:{port}")
     calls = []
     _fake_httpx(monkeypatch, calls)
-    took = llm.prepare_models(load_config("cloud"), log=lambda *_: None)
+    cfg = load_config("cloud")
+    took = llm.prepare_models(cfg, log=lambda *_: None)
     assert set(took) == {"gpt-oss:20b", "qwen3:14b", "gemma3:12b"}
     gens = {(port, body["model"]) for _, port, path, body in calls if path == "/api/generate"}
     assert gens == {(11441, "gpt-oss:20b"), (11442, "qwen3:14b"), (11443, "gemma3:12b")}
     assert all(body["keep_alive"] == -1 for *_, path, body in calls if path == "/api/generate")
     # Loaded at the debate's context size, so the first real request doesn't reload the model.
-    assert all(body["options"]["num_ctx"] == 8192 for *_, path, body in calls if path == "/api/generate")
+    assert cfg.llm.num_ctx == 16384
+    assert all(body["options"]["num_ctx"] == cfg.llm.num_ctx for *_, path, body in calls if path == "/api/generate")
 
 
 def test_prepare_models_fails_fast_on_auth_errors(monkeypatch):

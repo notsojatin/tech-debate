@@ -14,17 +14,21 @@ models:
 
 llm:
   seed: 42
-  num_ctx: 8192
+  # Fits the largest debate (10 rebuttal rounds of long speeches): the judge reads the whole transcript plus the
+  # cited evidence, about 10k tokens. One value for every call, so Ollama never reloads a model to resize it.
+  num_ctx: 16384
+  num_predict: 2048          # output cap per call; speeches need ~400 tokens, the rest is room for reasoning
   timeout_s: 600
   keep_alive: 5m
 
 debate:
-  rebuttal_rounds: 2
+  rebuttal_rounds: 2         # default; each debate may choose 1-10
   turn_retries: 3
-  words:
-    opening: 120
-    rebuttal: 110
-    closing: 30
+  speech_length: standard    # default; each debate may choose any preset below
+  speech_lengths:            # word limits per turn
+    short:    {opening: 80,  rebuttal: 70,  closing: 25}
+    standard: {opening: 120, rebuttal: 110, closing: 30}
+    long:     {opening: 200, rebuttal: 180, closing: 40}
   novelty_threshold: 0.6     # token-Jaccard; at or above this a new_point counts as a repeat
   quote_match_ratio: 0.85
   stance_check: true         # judge model checks each turn argues its assigned side; off-side turns retry
